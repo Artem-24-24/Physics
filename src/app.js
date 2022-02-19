@@ -103,7 +103,6 @@ class App {
     this.box = this.addBody()
   }
 
-
   addBody(box = true) {
 let shape
     if(!box) {
