@@ -6,6 +6,11 @@ import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls.js'
 import {CannonHelper} from './utils/CannonHelper.js'
 import * as CANNON from "cannon/build/cannon"
 
+import {fetchProfile} from "three/examples/jsm/libs/motion-controllers.module";
+
+const DEFAULT_PROFILES_PATH = 'webxr-input-profiles';
+const DEFAULT_PROFILE = 'generic-trigger';
+
 class App {
   constructor() {
     const container = document.createElement('div')
@@ -176,6 +181,7 @@ let shape
     this.controller.addEventListener('selectend', onSelectEnd)
     this.controller.addEventListener('connected', function (event) {
 
+      self.onConnect.call(self, event)
       const mesh = self.buildController.call(self, event.data)
       mesh.scale.z = 0
       this.add(mesh)
@@ -226,8 +232,64 @@ let shape
     }
 
   }
+  createButtonStates(components) {
+    const buttonStates = {}
+    this.gamepadIndices = components
+    Object.keys(components).forEach(key => {
+      if (key.includes('touchpad') || key.includes('thumbstick')) {
+        buttonStates[key] = { button: 0, xAxis: 0, yAxis: 0 }
+      } else {
+        buttonStates[key] = 0
+      }
+    })
+    this.buttonStates = buttonStates
+  }
+
+  onConnect( event){
+    const info = {};
+
+    fetchProfile(event.data, DEFAULT_PROFILES_PATH, DEFAULT_PROFILE)
+        .then(({profile, assetPath}) => {
+          // console.log( JSON.stringify(profile));
+
+          info.name = profile.profileId;
+          info.targetRayMode = event.data.targetRayMode;
+
+          Object.entries(profile.layouts).forEach(([key, layout]) => {
+            const components = {};
+            Object.values(layout.components).forEach((component) => {
+              components[component.rootNodeName] = component.gamepadIndices;
+            });
+            info[key] = components;
+          });
+
+
+
+
+          if (event.data.handedness === 'left') {
+            this.createButtonStates(info.left);
+          } else {
+            this.createButtonStates(info.right);
+          }
+
+          // console.log( JSON.stringify(info) );
+        });
+  }
 
   handleController(controller) {
+    const dt = this.clock.getDelta()
+    if (this.renderer.xr.isPresenting){
+      if (!this.elapsedTime) {
+        this.elapsedTime = 0
+      }
+      this.elapsedTime += dt
+      if (this.elapsedTime > 0.3) {
+        // this.updateGamepadState()
+        // this.updateUI(this.leftUi, this.buttonStates)
+        this.elapsedTime = 0
+      }
+    }
+
     if (!controller.userData.selectPressed) {
       controller.children[0].scale.z = 10
 
@@ -267,8 +329,28 @@ let shape
     } else {
       const constraint = controller.userData.constraint
       if (constraint) {
-        this.jointBody.position.copy(this.marker.getWorldPosition(this.origin))
-        constraint.update();
+
+        const ray = new THREE.Ray()
+        const direction = new THREE.Vector3()
+        direction.copy(this.marker.position)
+        direction.normalize()
+        ray.direction.copy(direction)
+        const position = new THREE.Vector3()
+
+
+         const yAxis = -.04 * Number(this.buttonStates["xr_standard_thumbstick"].yAxis)
+        //const yAxis = -.04 * Number(-1)
+
+        if (yAxis !== 0) {
+          const distance = controller.children[0].scale.z + yAxis
+          controller.children[0].scale.z = distance
+
+          ray.at(distance,position)
+          this.marker.position.copy(position)
+
+          this.jointBody.position.copy(this.marker.getWorldPosition(this.origin))
+          constraint.update();
+        }
       }
     }
   }
